@@ -427,12 +427,13 @@ async function getTodayRoutine(req, res, next) {
         completed = lastDone === todayStr;
         skipped   = lastSkip === todayStr;
       } else if (freq === 'weekly') {
-        completed = lastDone !== null && lastDone >= sevenDaysAgo;
-        skipped   = !completed && lastSkip !== null && lastSkip >= sevenDaysAgo;
+        // strict 비교: 완료일이 정확히 7일 전이면 오늘 리셋 (>= 이면 8일 주기가 됨)
+        completed = lastDone !== null && lastDone > sevenDaysAgo;
+        skipped   = !completed && lastSkip !== null && lastSkip > sevenDaysAgo;
       } else {
-        // monthly
-        completed = lastDone !== null && lastDone >= thirtyDaysAgo;
-        skipped   = !completed && lastSkip !== null && lastSkip >= thirtyDaysAgo;
+        // monthly — 같은 이유로 strict 비교
+        completed = lastDone !== null && lastDone > thirtyDaysAgo;
+        skipped   = !completed && lastSkip !== null && lastSkip > thirtyDaysAgo;
       }
 
       const isDone = completed || skipped;

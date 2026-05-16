@@ -53,6 +53,8 @@ const generalLimiter = rateLimit({
   message: { error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
 });
 
+app.get('/', (req, res) => res.json({ status: 'ok', message: 'CleanHome API server is running.' }));
+
 app.use('/api/auth',         authLimiter, authRoutes);
 app.use('/api/onboarding',   generalLimiter, onboardingRoutes);
 app.use('/api/routine',      generalLimiter, routineRoutes);

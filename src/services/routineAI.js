@@ -567,32 +567,34 @@ JSON 외 다른 텍스트는 절대 출력하지 마세요.`;
     shouldGenerateCustom ? generateCustomRoutines(profile) : Promise.resolve({}),
   ]);
 
+  // 카탈로그 추천 처리 — API 오류/파싱 실패 시 이전 추천을 유지하고 계속 진행한다.
+  // 맞춤생성 루틴은 카탈로그 결과와 관계없이 항상 저장해야 신규 유저도 첫 화면에 표시된다.
+  let sanitized = { ...previousRecommendations }; // default: 이전 카탈로그 추천 유지
   if (!response.ok) {
-    const err = await response.text().catch(() => '');
-    throw new Error(`AI API error: ${response.status} — ${err.slice(0, 200)}`);
-  }
-
-  const data = await response.json();
-  const text = data.content?.[0]?.text;
-  if (!text) throw new Error('AI API 응답 형식 오류');
-
-  const clean = text.replace(/```json|```/g, '').trim();
-  let recommendations;
-  try {
-    recommendations = JSON.parse(clean);
-  } catch (e) {
-    throw new Error(`AI 추천 JSON 파싱 실패: ${e.message}`);
-  }
-
-  // AI가 반환한 태스크명을 ID로 변환 (이름이 DB에 없으면 제거)
-  // trim()으로 앞뒤 공백 제거 후 매핑 — AI가 이름 주변에 공백을 추가하는 경우 방어
-  const sanitized = {};
-  for (const [space, names] of Object.entries(recommendations)) {
-    if (Array.isArray(names)) {
-      sanitized[space] = names
-        .filter(name => typeof name === 'string' && nameToId[name.trim()])
-        .map(name => nameToId[name.trim()])
-        .slice(0, 5);
+    const errText = await response.text().catch(() => '');
+    console.warn(`[routineAI] 카탈로그 API 오류: ${response.status} — 이전 추천 유지. ${errText.slice(0, 100)}`);
+  } else {
+    const data = await response.json().catch(() => null);
+    const text = data?.content?.[0]?.text;
+    if (!text) {
+      console.warn('[routineAI] 카탈로그 응답 텍스트 없음 — 이전 추천 유지');
+    } else {
+      const clean = text.replace(/```json|```/g, '').trim();
+      try {
+        const parsed = JSON.parse(clean);
+        const newSanitized = {};
+        for (const [space, names] of Object.entries(parsed)) {
+          if (Array.isArray(names)) {
+            newSanitized[space] = names
+              .filter(name => typeof name === 'string' && nameToId[name.trim()])
+              .map(name => nameToId[name.trim()])
+              .slice(0, 5);
+          }
+        }
+        sanitized = newSanitized;
+      } catch (e) {
+        console.warn('[routineAI] 카탈로그 JSON 파싱 실패 — 이전 추천 유지:', e.message);
+      }
     }
   }
 

@@ -108,10 +108,18 @@ async function generateCustomRoutines(profile) {
     home?.roomType === 'officetel' ? '오피스텔' : '',
   ].filter(Boolean).join(', ') || '미파악';
 
+  const personalityGuide = {
+    binge:       '한 번에 몰아서 청소하는 성향 → 짧은 시간 안에 끝낼 수 있는 집중 루틴',
+    busy:        '바쁜 일상 속 틈새 청소 성향 → 2~3분짜리 초단기 루틴',
+    perfectionist: '꼼꼼하게 관리하는 성향 → 놓치기 쉬운 세부 포인트 청소 루틴',
+    passive:     '청소를 자주 미루는 성향 → 아주 짧고 쉬운 입문 루틴',
+    maintainer:  '이미 청소 습관이 잡힌 성향 → 효율을 높이는 심화 루틴',
+  }[personality?.type] || '생활 패턴에 맞는 루틴';
+
   const prompt = `사용자 맞춤 청소 루틴 생성 요청입니다.
 
 사용자 정보:
-- 청소 성향: ${personality?.type || '미파악'}
+- 청소 성향: ${personality?.type || '미파악'} (${personalityGuide})
 - 하루 가능 시간: ${personality?.availableMinutes || 15}분
 - 거주 형태: ${houseContext}
 - 반려동물: ${home?.hasPet ? `있음 (${home.petType || '종류 미파악'})` : '없음'}
@@ -123,19 +131,20 @@ ${customFactsText}
 - 자주 건너뛰는 공간: ${skipSummary}
 - 청결 점수 낮은 공간: ${lowScoreSpaces}
 
-위 정보를 바탕으로 이 사용자에게 특화된 청소 루틴을 공간별로 2~3개씩 생성해주세요.
+위 사용자를 위한 청소 루틴을 공간별로 2~3개씩 생성해주세요.
 
 조건:
-1. "바닥 닦기" 같은 범용 루틴이 아닌, 이 사용자의 구체적 상황에 맞는 루틴이어야 합니다
-2. 반려동물·거주 형태·요리 빈도 등 온보딩 정보를 반드시 반영하세요 (예: 강아지 있음 → 털 제거 루틴, 1인 가구 원룸 → 공간 효율 루틴)
-3. 챗봇 정보(customFacts)가 있으면 그것을 최우선으로 반영하세요 (예: 청소기 없음 → 빗자루 활용 루틴)
-4. 소요 시간은 1~15분 사이로 현실적이어야 합니다
-5. 한국어로 구체적인 행동 지시문 형태여야 합니다 (예: "강아지 밥그릇 씻기")
-6. basis 필드에 추천 근거를 15자 이내로 적어주세요
+1. 【필수】 데이터가 적더라도 반드시 공간마다 2~3개씩 생성하세요. 빈 배열 반환은 절대 금지입니다.
+2. 청소 성향을 가장 중요한 기준으로 삼으세요. 성향 가이드: ${personalityGuide}
+3. 반려동물·거주 형태·요리 빈도 등 온보딩 정보를 루틴에 반영하세요
+4. 챗봇 정보(customFacts)가 있으면 최우선으로 반영하세요 (예: 청소기 없음 → 빗자루 활용 루틴)
+5. 소요 시간은 1~15분 사이로 현실적이어야 합니다
+6. 한국어 행동 지시문 형태로 작성하세요 (예: "세면대 주변 물기 닦기")
+7. basis 필드에 추천 근거를 15자 이내로 적어주세요
 
 반드시 다음 JSON 형식으로만 응답하세요:
 {
-  "living": [{"title": "강아지 소파 털 제거하기", "minutes": 5, "basis": "강아지 있음"}],
+  "living": [{"title": "거실 바닥 빠르게 쓸기", "minutes": 3, "basis": "몰아서해결형"}],
   "kitchen": [...],
   "closet": [...],
   "bathroom": [...],
@@ -165,10 +174,26 @@ ${customFactsText}
 
     const data = await response.json();
     const text = data.content?.[0]?.text;
-    if (!text) return {};
+    if (!text) {
+      console.warn('[routineAI] 맞춤 루틴: 응답 텍스트 없음');
+      return {};
+    }
 
-    const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
+    // Claude가 JSON 앞뒤에 설명 텍스트를 붙이는 경우를 대응해 regex로 JSON 객체만 추출
+    const stripped = text.replace(/```json|```/g, '').trim();
+    const jsonMatch = stripped.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.warn('[routineAI] 맞춤 루틴: JSON 추출 실패 — raw:', stripped.slice(0, 200));
+      return {};
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      console.warn('[routineAI] 맞춤 루틴: JSON 파싱 실패 —', e.message);
+      return {};
+    }
 
     const result = {};
     for (const [space, items] of Object.entries(parsed)) {
@@ -183,9 +208,12 @@ ${customFactsText}
           basis: (item.basis || '').slice(0, 20),
         }));
     }
+
+    const filled = Object.keys(result).filter(k => result[k].length > 0);
+    console.log(`[routineAI] 맞춤 루틴 생성: ${filled.join(', ')} (${filled.length}개 공간)`);
     return result;
   } catch (e) {
-    console.warn('[routineAI] 생성형 루틴 파싱 실패:', e.message);
+    console.warn('[routineAI] 맞춤 루틴 오류:', e.message);
     return {};
   }
 }

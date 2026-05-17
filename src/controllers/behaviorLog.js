@@ -964,12 +964,25 @@ async function getSpaceRecommendations(req, res, next) {
     //         — 온보딩 핸들러에서 두 호출이 동시에 실행될 때 맞춤 루틴만 실패하는 케이스 대응
     const noCustomRoutines = Object.keys(profile?.aiGeneratedRoutines ?? {}).length === 0;
     if (profile?.isOnboarded && noCustomRoutines) {
-      console.log(`[getSpaceRecommendations] uid=${uid} 맞춤 루틴 없음 → 즉시 생성 (updatedAt=${profile?.aiRecommendationsUpdatedAt ?? 'null'})`);
-      try {
-        await generateAiRecommendations(uid, spaceKey, true);
-        profile = (await db.collection('users').doc(uid).get()).data();
-      } catch (e) {
-        console.error('[getSpaceRecommendations] 맞춤 루틴 자동 생성 실패:', e.message);
+      // 1시간 쿨다운 — 반복 재생성으로 인한 Firestore 쿼터 초과 방지
+      const lastAttempt = profile?.aiGenerationAttemptedAt;
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const withinCooldown = lastAttempt && lastAttempt > oneHourAgo;
+
+      if (withinCooldown) {
+        console.log(`[getSpaceRecommendations] uid=${uid} 쿨다운 중 — 재생성 건너뜀 (마지막 시도: ${lastAttempt})`);
+      } else {
+        console.log(`[getSpaceRecommendations] uid=${uid} 맞춤 루틴 없음 → 즉시 생성`);
+        // 시도 시각을 먼저 기록 — 실패하더라도 1시간 쿨다운 적용
+        await db.collection('users').doc(uid).update({
+          aiGenerationAttemptedAt: new Date().toISOString(),
+        }).catch(() => null);
+        try {
+          await generateAiRecommendations(uid, spaceKey, true);
+          profile = (await db.collection('users').doc(uid).get()).data();
+        } catch (e) {
+          console.error('[getSpaceRecommendations] 맞춤 루틴 자동 생성 실패:', e.message);
+        }
       }
     }
 

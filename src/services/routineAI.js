@@ -163,7 +163,7 @@ function buildPersonalityFallback(profile) {
 // 5분 TTL 캐시로 매 요청마다 DB 호출을 방지한다.
 let _catalogueCache = null;
 let _catalogueCachedAt = 0;
-const CATALOGUE_TTL_MS = 5 * 60 * 1000;
+const CATALOGUE_TTL_MS = 60 * 60 * 1000; // 1시간 — 콜드 스타트마다 knowledgeBase 전체 읽기 방지
 
 async function loadRoutineCatalogue() {
   const now = Date.now();

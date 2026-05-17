@@ -948,7 +948,6 @@ async function getCatalogueCounts(req, res, next) {
 }
 
 // 공간별 AI 맞춤 추천 반환 — 카탈로그 ID 목록 + 생성형 루틴 객체 목록 + 카탈로그 루틴 상세
-// aiRecommendationsUpdatedAt 이 없으면 온보딩 AI 생성이 실패한 것이므로 여기서 즉시 재생성한다.
 async function getSpaceRecommendations(req, res, next) {
   try {
     const uid = req.user.uid;
@@ -959,14 +958,18 @@ async function getSpaceRecommendations(req, res, next) {
     ]);
     let profile = profileDoc.data();
 
-    // AI 추천이 한 번도 생성되지 않은 계정 (온보딩 AI 실패 포함) → 즉시 생성 후 반환
-    if (profile?.isOnboarded && !profile?.aiRecommendationsUpdatedAt) {
-      console.log(`[getSpaceRecommendations] uid=${uid} 추천 없음 → 즉시 생성`);
+    // 맞춤 생성 루틴이 비어있는 경우 여기서 즉시 재생성한다.
+    // 조건 1: 온보딩 후 AI 호출 자체가 한 번도 성공하지 않은 경우 (!aiRecommendationsUpdatedAt)
+    // 조건 2: 카탈로그 추천은 성공했지만 맞춤 루틴 생성만 실패한 경우 (aiGeneratedRoutines 비어있음)
+    //         — 온보딩 핸들러에서 두 호출이 동시에 실행될 때 맞춤 루틴만 실패하는 케이스 대응
+    const noCustomRoutines = Object.keys(profile?.aiGeneratedRoutines ?? {}).length === 0;
+    if (profile?.isOnboarded && noCustomRoutines) {
+      console.log(`[getSpaceRecommendations] uid=${uid} 맞춤 루틴 없음 → 즉시 생성 (updatedAt=${profile?.aiRecommendationsUpdatedAt ?? 'null'})`);
       try {
         await generateAiRecommendations(uid, spaceKey, true);
         profile = (await db.collection('users').doc(uid).get()).data();
       } catch (e) {
-        console.error('[getSpaceRecommendations] 자동 생성 실패:', e.message);
+        console.error('[getSpaceRecommendations] 맞춤 루틴 자동 생성 실패:', e.message);
       }
     }
 

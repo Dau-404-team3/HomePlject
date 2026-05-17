@@ -948,14 +948,28 @@ async function getCatalogueCounts(req, res, next) {
 }
 
 // 공간별 AI 맞춤 추천 반환 — 카탈로그 ID 목록 + 생성형 루틴 객체 목록 + 카탈로그 루틴 상세
+// aiRecommendationsUpdatedAt 이 없으면 온보딩 AI 생성이 실패한 것이므로 여기서 즉시 재생성한다.
 async function getSpaceRecommendations(req, res, next) {
   try {
     const uid = req.user.uid;
     const { spaceKey } = req.params;
-    const [profile, catalogue] = await Promise.all([
-      db.collection('users').doc(uid).get().then(d => d.data()),
+    let [profileDoc, catalogue] = await Promise.all([
+      db.collection('users').doc(uid).get(),
       loadRoutineCatalogue(),
     ]);
+    let profile = profileDoc.data();
+
+    // AI 추천이 한 번도 생성되지 않은 계정 (온보딩 AI 실패 포함) → 즉시 생성 후 반환
+    if (profile?.isOnboarded && !profile?.aiRecommendationsUpdatedAt) {
+      console.log(`[getSpaceRecommendations] uid=${uid} 추천 없음 → 즉시 생성`);
+      try {
+        await generateAiRecommendations(uid, spaceKey, true);
+        profile = (await db.collection('users').doc(uid).get()).data();
+      } catch (e) {
+        console.error('[getSpaceRecommendations] 자동 생성 실패:', e.message);
+      }
+    }
+
     const ids = profile?.aiRecommendations?.[spaceKey] ?? [];
     const generated = profile?.aiGeneratedRoutines?.[spaceKey] ?? [];
     const updatedAt = profile?.aiRecommendationsUpdatedAt ?? null;

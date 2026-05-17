@@ -11,6 +11,30 @@ const { db } = require('../services/firebase');
 const { analyzeSkipPattern, analyzeCompletionPattern } = require('../services/behaviorPatternAnalyzer');
 const { learnFromTaskPerformance } = require('../services/taskPerformanceLearner');
 
+// 홈 화면 로드 시 getTodayRoutine·getWeeklyStats·getAiComment가 각자 프로필을 읽는 것을
+// 60초 인메모리 캐시로 통합 — 프로필 읽기를 세션당 1회로 절감
+const _profileCache = new Map();
+const PROFILE_CACHE_TTL = 60 * 1000;
+function _getProfileCache(uid) {
+  const e = _profileCache.get(uid);
+  if (e && Date.now() < e.exp) return e.data;
+  _profileCache.delete(uid);
+  return null;
+}
+function _setProfileCache(uid, data) {
+  _profileCache.set(uid, { data, exp: Date.now() + PROFILE_CACHE_TTL });
+}
+function _invalidateProfileCache(uid) {
+  _profileCache.delete(uid);
+}
+async function _fetchProfile(uid) {
+  const cached = _getProfileCache(uid);
+  if (cached) return cached;
+  const data = (await db.collection('users').doc(uid).get()).data();
+  if (data) _setProfileCache(uid, data);
+  return data;
+}
+
 const AI_API_URL = process.env.AI_API_URL;
 const AI_API_KEY = process.env.AI_API_KEY;
 
@@ -52,6 +76,7 @@ async function completeChecklist(req, res, next) {
 
     // 10의 배수 완료 시에만 패턴 분석 실행 (비용 절감)
     // await 없이 백그라운드 실행 (응답 속도에 영향 없음)
+    _invalidateProfileCache(uid);
     analyzeCompletionPattern(uid).catch(() => null);
     learnFromTaskPerformance(uid).catch(() => null);
 
@@ -85,7 +110,8 @@ async function skipChecklist(req, res, next) {
     });
 
     // 건너뜀 패턴 확인 후 루틴 재조정 필요 여부 반환
-    const profile = (await db.collection('users').doc(uid).get()).data();
+    _invalidateProfileCache(uid);
+    const profile = await _fetchProfile(uid);
     const skipCount = profile?.behaviorStats?.skipPatterns?.[space] || 0;
 
     // 건너뜀 패턴 분석 백그라운드 실행 (응답 속도에 영향 없음)
@@ -358,7 +384,7 @@ async function resetRoutine(req, res, next) {
 async function getTodayRoutine(req, res, next) {
   try {
     const uid = req.user.uid;
-    const profile = (await db.collection('users').doc(uid).get()).data();
+    const profile = await _fetchProfile(uid);
 
     // 방치된 공간 점수 자동 감소 (홈 화면 로드마다 실행)
     // 반환값은 감소 적용 후 spaceStatus — 이후 res.json에 사용
@@ -402,20 +428,23 @@ async function getTodayRoutine(req, res, next) {
     }
     const mergedTasks = [...(todayDayRoutine?.tasks || []), ...recurringTasks];
 
-    // 완료/건너뜀 상태 조회 — 최근 30일치를 한 번에 조회해 빈도별로 판단
-    // (매일: 오늘, 주간: 7일, 월간: 30일)
+    // 완료/건너뜀 상태 조회 — 오늘 목록의 실제 빈도에 따라 조회 범위를 최소화
+    // 일일 루틴만 있으면 오늘 하루치만, 주간 있으면 7일, 월간 있으면 30일
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const hasMonthly = mergedTasks.some(t => (t.frequency || 'daily') === 'monthly');
+    const hasWeekly  = mergedTasks.some(t => (t.frequency || 'daily') === 'weekly');
+    const queryFrom  = hasMonthly ? thirtyDaysAgo : hasWeekly ? sevenDaysAgo : todayStr;
 
     const [completedSnap, skippedSnap] = await Promise.all([
       db.collection('completedTasks')
         .where('uid', '==', uid)
-        .where('date', '>=', thirtyDaysAgo)
+        .where('date', '>=', queryFrom)
         .where('date', '<=', todayStr)
         .get(),
       db.collection('skippedTasks')
         .where('uid', '==', uid)
-        .where('date', '>=', thirtyDaysAgo)
+        .where('date', '>=', queryFrom)
         .where('date', '<=', todayStr)
         .get(),
     ]);
@@ -525,7 +554,7 @@ async function getWeeklyStats(req, res, next) {
       .get();
     const completedCount = weekCompletedSnap.size;
 
-    const profile = (await db.collection('users').doc(uid).get()).data();
+    const profile = await _fetchProfile(uid);
 
     // 루틴 없는 신규 사용자: 에러가 아닌 빈 통계 반환
     if (!profile?.activeRoutineId) {
@@ -594,11 +623,10 @@ async function getAiComment(req, res, next) {
     const uid = req.user.uid;
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const profileDoc = await db.collection('users').doc(uid).get();
-    if (!profileDoc.exists) {
+    const profile = await _fetchProfile(uid);
+    if (!profile) {
       return res.status(404).json({ error: '프로파일이 없습니다.' });
     }
-    const profile = profileDoc.data();
 
     // 오늘 날짜로 생성된 캐시가 있으면 Claude 호출 없이 그대로 반환
     if (profile.todayComment?.date === todayStr) {
@@ -952,11 +980,10 @@ async function getSpaceRecommendations(req, res, next) {
   try {
     const uid = req.user.uid;
     const { spaceKey } = req.params;
-    let [profileDoc, catalogue] = await Promise.all([
-      db.collection('users').doc(uid).get(),
+    let [profile, catalogue] = await Promise.all([
+      _fetchProfile(uid),
       loadRoutineCatalogue(),
     ]);
-    let profile = profileDoc.data();
 
     // 맞춤 생성 루틴이 비어있는 경우 여기서 즉시 재생성한다.
     // 조건 1: 온보딩 후 AI 호출 자체가 한 번도 성공하지 않은 경우 (!aiRecommendationsUpdatedAt)
@@ -979,7 +1006,8 @@ async function getSpaceRecommendations(req, res, next) {
         }).catch(() => null);
         try {
           await generateAiRecommendations(uid, spaceKey, true);
-          profile = (await db.collection('users').doc(uid).get()).data();
+          _invalidateProfileCache(uid);
+          profile = await _fetchProfile(uid);
         } catch (e) {
           console.error('[getSpaceRecommendations] 맞춤 루틴 자동 생성 실패:', e.message);
         }
@@ -1004,7 +1032,7 @@ async function getSpaceRecommendations(req, res, next) {
 async function getActiveTaskIds(req, res, next) {
   try {
     const uid = req.user.uid;
-    const profile = (await db.collection('users').doc(uid).get()).data();
+    const profile = await _fetchProfile(uid);
     if (!profile?.activeRoutineId) {
       return res.json({ ids: [] });
     }

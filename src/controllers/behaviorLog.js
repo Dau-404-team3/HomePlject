@@ -207,6 +207,7 @@ async function editRoutine(req, res, next) {
         activeRoutineId,
         isOnboarded: true,
       });
+      _invalidateProfileCache(uid); // activeRoutineId 변경 — 캐시 즉시 무효화
     } else {
       routineRef = db.collection('routines').doc(activeRoutineId);
       const routineDoc = await routineRef.get();

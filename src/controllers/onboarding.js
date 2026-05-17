@@ -45,9 +45,9 @@ async function submitOnboarding(req, res, next) {
     await db.collection('users').doc(uid).set(profile);
     console.log(`[온보딩] uid=${uid} 프로파일 저장 완료 (type=${cleaningType})`);
 
-    // 온보딩 데이터 기반 AI 맞춤 추천 즉시 생성
+    // 온보딩 데이터 기반 AI 맞춤 추천 즉시 생성 (forceCustom=true: 온보딩 정보로 맞춤 루틴 포함)
     // 실패해도 온보딩 자체는 완료 처리
-    await generateAiRecommendations(uid).catch(err =>
+    await generateAiRecommendations(uid, null, true).catch(err =>
       console.error('[온보딩] AI 추천 생성 실패:', err.message)
     );
 

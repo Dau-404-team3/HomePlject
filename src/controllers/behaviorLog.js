@@ -310,10 +310,40 @@ async function resetRoutine(req, res, next) {
     }
 
     const ALL_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // 루틴 태스크 초기화
     await db.collection('routines').doc(profile.activeRoutineId).update({
       weeklyRoutine: ALL_DAYS.map(day => ({ day, tasks: [] })),
       updatedAt: new Date().toISOString(),
     });
+
+    // 최근 30일 완료/건너뜀 기록 전부 삭제
+    // — 주간(7일)/월간(30일) 태스크도 남은 기간 문구 없이 새로 시작하도록 하기 위함
+    // — streak는 streaks/current 서브컬렉션에 별도 저장되므로 영향 없음
+    const thirtyDaysAgoStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const [completedSnap, skippedSnap] = await Promise.all([
+      db.collection('completedTasks')
+        .where('uid', '==', uid)
+        .where('date', '>=', thirtyDaysAgoStr)
+        .where('date', '<=', todayStr)
+        .get(),
+      db.collection('skippedTasks')
+        .where('uid', '==', uid)
+        .where('date', '>=', thirtyDaysAgoStr)
+        .where('date', '<=', todayStr)
+        .get(),
+    ]);
+
+    const toDelete = [...completedSnap.docs, ...skippedSnap.docs];
+    if (toDelete.length > 0) {
+      // Firestore 배치 한도(500)를 고려해 청크 단위로 삭제
+      for (let i = 0; i < toDelete.length; i += 500) {
+        const batch = db.batch();
+        toDelete.slice(i, i + 500).forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+      }
+    }
 
     res.json({ success: true });
   } catch (err) {

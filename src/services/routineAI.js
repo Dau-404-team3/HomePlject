@@ -26,111 +26,137 @@ const SPACE_LABELS = {
   laundry: '세탁',
 };
 
-// ── 성향 타입별 기본 맞춤 루틴 ──────────────────────────────────
-// AI 생성 결과가 비어있는 공간에 적용하는 보장 루틴.
-// 신규 유저(행동 데이터 없음)도 온보딩 즉시 맞춤생성 뱃지가 표시되도록 한다.
-// AI 재생성 시 더 구체적인 루틴이 있으면 해당 공간을 덮어쓴다.
-const PERSONALITY_BASE_ROUTINES = {
-  binge: {
-    bathroom: [
-      { title: '화장실 변기·세면대 한 번에 닦기', minutes: 10, basis: '몰아서해결형' },
-      { title: '욕실 바닥·벽 한꺼번에 청소', minutes: 8, basis: '몰아서해결형' },
-    ],
-    kitchen: [
-      { title: '주방 싱크대·가스레인지 동시 닦기', minutes: 10, basis: '몰아서해결형' },
-      { title: '냄비·프라이팬 한꺼번에 세척', minutes: 8, basis: '몰아서해결형' },
-    ],
-    living: [
-      { title: '거실 바닥 한 번에 쓸고 닦기', minutes: 10, basis: '몰아서해결형' },
-      { title: '소파·쿠션 한꺼번에 정리', minutes: 5, basis: '몰아서해결형' },
-    ],
-    closet: [
-      { title: '옷장 전체 한 번에 정리 정돈', minutes: 15, basis: '몰아서해결형' },
-    ],
-    laundry: [
-      { title: '빨래 모아서 한 번에 돌리기', minutes: 5, basis: '몰아서해결형' },
-    ],
-  },
-  busy: {
-    bathroom: [
-      { title: '세면대 2분 빠른 닦기', minutes: 2, basis: '틈새청소형' },
-      { title: '변기 브러시로 빠르게 닦기', minutes: 3, basis: '틈새청소형' },
-    ],
-    kitchen: [
-      { title: '식사 후 바로 싱크대 닦기', minutes: 2, basis: '틈새청소형' },
-      { title: '가스레인지 쓴 뒤 바로 닦기', minutes: 3, basis: '틈새청소형' },
-    ],
-    living: [
-      { title: '거실 바닥 빠르게 쓸기', minutes: 3, basis: '틈새청소형' },
-      { title: '테이블 위 빠르게 정리', minutes: 2, basis: '틈새청소형' },
-    ],
-    closet: [
-      { title: '입은 옷 바로 제자리에 걸기', minutes: 2, basis: '틈새청소형' },
-    ],
-    laundry: [
-      { title: '빨래 바구니 확인 후 세탁기 돌리기', minutes: 3, basis: '틈새청소형' },
-    ],
-  },
-  perfectionist: {
-    bathroom: [
-      { title: '욕실 구석구석 꼼꼼히 닦기', minutes: 15, basis: '꼼꼼관리형' },
-      { title: '거울·수납장 틈새 청소', minutes: 5, basis: '꼼꼼관리형' },
-    ],
-    kitchen: [
-      { title: '주방 타일 기름때 꼼꼼히 제거', minutes: 10, basis: '꼼꼼관리형' },
-      { title: '냉장고 손잡이·외관 닦기', minutes: 5, basis: '꼼꼼관리형' },
-    ],
-    living: [
-      { title: '창문틀·블라인드 먼지 꼼꼼히 닦기', minutes: 10, basis: '꼼꼼관리형' },
-      { title: '가구 밑 먼지 제거', minutes: 8, basis: '꼼꼼관리형' },
-    ],
-    closet: [
-      { title: '옷장 내부 선반 먼지 닦기', minutes: 10, basis: '꼼꼼관리형' },
-    ],
-    laundry: [
-      { title: '세탁기 내부·고무패킹 청소', minutes: 5, basis: '꼼꼼관리형' },
-    ],
-  },
-  passive: {
-    bathroom: [
-      { title: '세면대 30초 간단 닦기', minutes: 1, basis: '느긋한자유형' },
-      { title: '변기 빠르게 한 번 닦기', minutes: 2, basis: '느긋한자유형' },
-    ],
-    kitchen: [
-      { title: '설거지 후 주변 물기 닦기', minutes: 2, basis: '느긋한자유형' },
-    ],
-    living: [
-      { title: '눈에 보이는 쓰레기 줍기', minutes: 1, basis: '느긋한자유형' },
-      { title: '소파 주변 간단 정리', minutes: 3, basis: '느긋한자유형' },
-    ],
-    closet: [
-      { title: '입은 옷 제자리에 걸기', minutes: 2, basis: '느긋한자유형' },
-    ],
-    laundry: [
-      { title: '세탁물 빨래 바구니에 넣기', minutes: 1, basis: '느긋한자유형' },
-    ],
-  },
-  maintainer: {
-    bathroom: [
-      { title: '욕실 환기팬 먼지 제거', minutes: 5, basis: '생활습관형' },
-      { title: '배수구 머리카락 제거', minutes: 3, basis: '생활습관형' },
-    ],
-    kitchen: [
-      { title: '냉장고 정리·유통기한 확인', minutes: 10, basis: '생활습관형' },
-      { title: '주방 후드 필터 닦기', minutes: 8, basis: '생활습관형' },
-    ],
-    living: [
-      { title: '커튼·블라인드 먼지 털기', minutes: 5, basis: '생활습관형' },
-      { title: '스위치·콘센트 주변 닦기', minutes: 3, basis: '생활습관형' },
-    ],
-    closet: [
-      { title: '계절 옷 정리 및 수납', minutes: 15, basis: '생활습관형' },
-    ],
-    laundry: [
-      { title: '세탁기 청소 주기 체크 및 통세척', minutes: 5, basis: '생활습관형' },
-    ],
-  },
-};
+// ── 온보딩 설문 기반 맞춤 보장 루틴 생성 ────────────────────────
+// AI 생성 결과가 없거나 실패했을 때 반드시 호출. 성향 타입 + 반려동물 + 요리빈도 +
+// 거주형태 등 온보딩 8개 항목을 모두 반영해 신규 유저도 맞춤 루틴을 즉시 표시한다.
+function buildPersonalityFallback(profile) {
+  const type = profile?.personality?.type || 'binge';
+  const home = profile?.home || {};
+  const { hasPet, petType, houseType, cookingFrequency } = home;
+
+  const isDog     = hasPet && petType === 'dog';
+  const isCat     = hasPet && petType === 'cat';
+  const cookingHeavy = cookingFrequency === 'daily' || cookingFrequency === 'often';
+  const isFamily  = houseType === 'family';
+
+  // 성향별 분 범위 [짧음, 중간, 김]
+  const [ms, mm, ml] = {
+    binge:        [8, 12, 15],
+    busy:         [2,  3,  5],
+    perfectionist:[5, 10, 15],
+    passive:      [1,  2,  3],
+    maintainer:   [3,  7, 10],
+  }[type] || [5, 10, 15];
+
+  const suf = {
+    binge: '몰아서해결형', busy: '틈새청소형', perfectionist: '꼼꼼관리형',
+    passive: '느긋한자유형', maintainer: '생활습관형',
+  }[type] || '맞춤형';
+
+  const r = (title, minutes, basis) => ({
+    title, minutes: Math.max(1, Math.min(15, minutes)), basis,
+  });
+
+  // ── 화장실 ──────────────────────────────────────────────────
+  const bathroomRows = {
+    binge:        [r('변기·세면대·욕조 한 번에 닦기', ml, suf), r('욕실 바닥·벽 한꺼번에 청소', mm, suf)],
+    busy:         [r('세면대 2분 빠른 닦기', ms, suf), r('변기 브러시로 빠르게 닦기', ms + 1, suf)],
+    perfectionist:[r('욕실 구석구석 꼼꼼히 닦기', ml, suf), r('거울·수납장 틈새 청소', ms, suf)],
+    passive:      [r('세면대 30초 간단 닦기', 1, suf), r('변기 빠르게 한 번 닦기', ms + 1, suf)],
+    maintainer:   [r('욕실 환기팬 먼지 제거', ms, suf), r('배수구 머리카락 제거', ms, suf)],
+  }[type] || [];
+  const bathroom = [...bathroomRows];
+  if (isCat) bathroom.push(r('고양이 화장실 모래 교체·청소', Math.min(ms + 2, 5), '반려묘 위생'));
+
+  // ── 주방 ────────────────────────────────────────────────────
+  const kitchen = cookingHeavy
+    ? ({
+        binge:        [r('가스레인지·싱크대·후드 한 번에 청소', ml, '요리빈도·' + suf), r('냄비·프라이팬 한꺼번에 세척', mm, '요리빈도·' + suf)],
+        busy:         [r('요리 후 가스레인지 바로 닦기', ms + 1, '요리빈도·' + suf), r('식사 후 바로 싱크대 닦기', ms, '요리빈도·' + suf)],
+        perfectionist:[r('가스레인지 틈새 기름때 꼼꼼히 제거', mm, '요리빈도·' + suf), r('주방 후드 필터 청소', mm, '요리빈도·' + suf), r('냉장고 외관·손잡이 닦기', ms, '요리빈도·' + suf)],
+        passive:      [r('가스레인지 눈에 보이는 오염 닦기', ms + 1, '요리빈도·' + suf), r('설거지 후 주변 물기 닦기', ms, '요리빈도·' + suf)],
+        maintainer:   [r('냉장고 정리·유통기한 확인', mm, '요리빈도·' + suf), r('주방 후드 필터 주기적 청소', mm, '요리빈도·' + suf)],
+      }[type] || [])
+    : ({
+        binge:        [r('주방 싱크대·가스레인지 동시 닦기', mm, suf), r('냄비·프라이팬 한꺼번에 세척', mm, suf)],
+        busy:         [r('식사 후 바로 싱크대 닦기', ms, suf), r('가스레인지 쓴 뒤 바로 닦기', ms + 1, suf)],
+        perfectionist:[r('주방 타일 기름때 꼼꼼히 제거', mm, suf), r('냉장고 손잡이·외관 닦기', ms, suf)],
+        passive:      [r('설거지 후 주변 물기 닦기', ms + 1, suf)],
+        maintainer:   [r('냉장고 정리·유통기한 확인', mm, suf), r('주방 후드 필터 닦기', mm, suf)],
+      }[type] || []);
+
+  // ── 거실 ────────────────────────────────────────────────────
+  const living = isDog
+    ? ({
+        binge:        [r('강아지 털 청소기로 거실 한 번에 청소', ml, '반려견·' + suf), r('소파·쿠션 롤러로 털 제거', mm, '반려견·' + suf)],
+        busy:         [r('소파 롤러로 강아지 털 빠르게 제거', ms + 1, '반려견·' + suf), r('거실 바닥 빠르게 쓸기', ms, suf)],
+        perfectionist:[r('강아지 털 구석구석 청소기 흡입', ml, '반려견·' + suf), r('창문틀·블라인드 먼지 닦기', mm, suf)],
+        passive:      [r('강아지 털 눈에 보이는 것만 줍기', ms + 1, '반려견·' + suf), r('소파 주변 간단 정리', ms + 2, suf)],
+        maintainer:   [r('강아지 털 주기적 청소기 루틴 실행', mm, '반려견·' + suf), r('커튼·블라인드 먼지 털기', ms, suf)],
+      }[type] || [])
+    : isCat
+    ? ({
+        binge:        [r('고양이 털 롤러로 소파·침구 한 번에 청소', mm, '반려묘·' + suf), r('캣타워 주변 먼지·털 청소', mm, '반려묘·' + suf)],
+        busy:         [r('고양이 털 롤러로 소파 빠르게 제거', ms + 1, '반려묘·' + suf), r('거실 바닥 빠르게 쓸기', ms, suf)],
+        perfectionist:[r('고양이 털·비듬 꼼꼼히 제거', mm, '반려묘·' + suf), r('캣타워 주변 구석구석 청소', mm, '반려묘·' + suf)],
+        passive:      [r('소파 위 고양이 털 간단히 털기', ms + 1, '반려묘·' + suf), r('눈에 보이는 쓰레기 줍기', 1, suf)],
+        maintainer:   [r('캣타워 주변·소파 주기적 털 청소', mm, '반려묘·' + suf), r('스위치·콘센트 주변 닦기', ms, suf)],
+      }[type] || [])
+    : isFamily
+    ? ({
+        binge:        [r('거실 바닥 한 번에 쓸고 닦기', ml, '가족가구·' + suf), r('소파·쿠션 한꺼번에 정리', mm, suf)],
+        busy:         [r('거실 바닥 빠르게 쓸기', ms, suf), r('테이블 위 빠르게 정리', ms, suf)],
+        perfectionist:[r('창문틀·블라인드 먼지 꼼꼼히 닦기', mm, suf), r('가구 밑 먼지 제거', mm, suf)],
+        passive:      [r('눈에 보이는 쓰레기 줍기', 1, suf), r('소파 주변 간단 정리', ms + 2, suf)],
+        maintainer:   [r('커튼·블라인드 먼지 털기', ms, suf), r('스위치·콘센트 주변 닦기', ms, suf)],
+      }[type] || [])
+    : ({
+        binge:        [r('거실 바닥 한 번에 쓸고 닦기', mm, suf), r('소파·쿠션 한꺼번에 정리', ms, suf)],
+        busy:         [r('거실 바닥 빠르게 쓸기', ms, suf), r('테이블 위 빠르게 정리', ms, suf)],
+        perfectionist:[r('창문틀 먼지 꼼꼼히 닦기', mm, suf), r('가구 밑 먼지 제거', mm, suf)],
+        passive:      [r('눈에 보이는 쓰레기 줍기', 1, suf), r('소파 주변 간단 정리', ms + 1, suf)],
+        maintainer:   [r('커튼·블라인드 먼지 털기', ms, suf), r('스위치·콘센트 주변 닦기', ms, suf)],
+      }[type] || []);
+
+  // ── 옷장 ────────────────────────────────────────────────────
+  const closetBase = {
+    binge:        [r('옷장 전체 한 번에 정리 정돈', ml, suf), r('안 입는 옷 정리·정돈', mm, suf)],
+    busy:         [r('입은 옷 바로 제자리에 걸기', ms, suf)],
+    perfectionist:[r('옷장 내부 선반 먼지 닦기', mm, suf), r('계절 옷 분류 수납', ml, suf)],
+    passive:      [r('입은 옷 제자리에 걸기', ms + 1, suf)],
+    maintainer:   [r('계절 옷 정리 및 수납', ml, suf), r('옷장 내부 습기·냄새 관리', ms, suf)],
+  }[type] || [];
+  const closet = [...closetBase];
+  if (isFamily && closet.length < 3) closet.push(r('가족 의류 계절별 정리 수납', ml, '가족가구·' + suf));
+
+  // ── 세탁 ────────────────────────────────────────────────────
+  const laundryBase = {
+    binge:        [r('빨래 모아서 한 번에 돌리기', ms, suf)],
+    busy:         [r('빨래 바구니 확인 후 세탁기 돌리기', ms + 1, suf)],
+    perfectionist:[r('세탁기 내부·고무패킹 청소', ms, suf), r('세탁물 종류별 분류 세탁', ms + 2, suf)],
+    passive:      [r('세탁물 빨래 바구니에 넣기', 1, suf)],
+    maintainer:   [r('세탁기 청소 주기 체크 및 통세척', ms, suf), r('세탁물 주기적 분류·정리', ms, suf)],
+  }[type] || [];
+  const laundry = [...laundryBase];
+  if (isDog) laundry.push(r('강아지 담요·방석 세탁기 돌리기', Math.min(ms + 2, 5), '반려견 위생'));
+  else if (isCat) laundry.push(r('고양이 털 묻은 옷 세탁기 돌리기', Math.min(ms + 2, 5), '반려묘 위생'));
+
+  // ── ID 매핑 후 반환 ─────────────────────────────────────────
+  const raw = { bathroom, kitchen, living, closet, laundry };
+  const result = {};
+  for (const [space, items] of Object.entries(raw)) {
+    const valid = items.filter(item => item?.title);
+    if (valid.length > 0) {
+      result[space] = valid.slice(0, 3).map(item => ({
+        id: `gen-${space}-${hashTitle(item.title)}`,
+        title: item.title,
+        minutes: item.minutes,
+        basis: item.basis,
+      }));
+    }
+  }
+  return result;
+}
 
 // ── DB 기반 카탈로그 로더 ────────────────────────────────────
 // knowledgeBase (ai_generated==false) 에서 카탈로그를 동적으로 로드한다.
@@ -274,31 +300,31 @@ ${customFactsText}
     });
 
     if (!response.ok) {
-      console.warn(`[routineAI] 생성형 루틴 API 오류: ${response.status}`);
-      return {};
+      console.warn(`[routineAI] 생성형 루틴 API 오류: ${response.status} — 온보딩 폴백 사용`);
+      return buildPersonalityFallback(profile);
     }
 
     const data = await response.json();
     const text = data.content?.[0]?.text;
     if (!text) {
-      console.warn('[routineAI] 맞춤 루틴: 응답 텍스트 없음');
-      return {};
+      console.warn('[routineAI] 맞춤 루틴: 응답 텍스트 없음 — 온보딩 폴백 사용');
+      return buildPersonalityFallback(profile);
     }
 
     // Claude가 JSON 앞뒤에 설명 텍스트를 붙이는 경우를 대응해 regex로 JSON 객체만 추출
     const stripped = text.replace(/```json|```/g, '').trim();
     const jsonMatch = stripped.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.warn('[routineAI] 맞춤 루틴: JSON 추출 실패 — raw:', stripped.slice(0, 200));
-      return {};
+      console.warn('[routineAI] 맞춤 루틴: JSON 추출 실패 — 온보딩 폴백 사용. raw:', stripped.slice(0, 200));
+      return buildPersonalityFallback(profile);
     }
 
     let parsed;
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch (e) {
-      console.warn('[routineAI] 맞춤 루틴: JSON 파싱 실패 —', e.message);
-      return {};
+      console.warn('[routineAI] 맞춤 루틴: JSON 파싱 실패 — 온보딩 폴백 사용:', e.message);
+      return buildPersonalityFallback(profile);
     }
 
     const result = {};
@@ -315,20 +341,11 @@ ${customFactsText}
         }));
     }
 
-    // AI 결과가 비어있는 공간은 성향 타입 기반 보장 루틴으로 채운다.
-    // 신규 유저(행동 데이터 없음)도 온보딩 직후부터 맞춤 루틴이 표시되도록 하기 위함.
-    const fallback = PERSONALITY_BASE_ROUTINES[personality?.type] || PERSONALITY_BASE_ROUTINES.binge;
+    // AI 결과가 비어있는 공간은 온보딩 기반 보장 루틴으로 채운다.
+    const fallbackResult = buildPersonalityFallback(profile);
     for (const space of Object.keys(SPACE_LABELS)) {
       if (!result[space] || result[space].length === 0) {
-        const items = fallback[space] || [];
-        if (items.length > 0) {
-          result[space] = items.map(item => ({
-            id: `gen-${space}-${hashTitle(item.title)}`,
-            title: item.title,
-            minutes: item.minutes,
-            basis: item.basis,
-          }));
-        }
+        if (fallbackResult[space]?.length > 0) result[space] = fallbackResult[space];
       }
     }
 
@@ -336,19 +353,8 @@ ${customFactsText}
     console.log(`[routineAI] 맞춤 루틴 생성 완료: ${filled.join(', ')} (${filled.length}개 공간)`);
     return result;
   } catch (e) {
-    // API 호출 자체가 실패해도 성향 기반 보장 루틴 반환
-    console.warn('[routineAI] 맞춤 루틴 AI 오류, 성향 기반 폴백 사용:', e.message);
-    const fallback = PERSONALITY_BASE_ROUTINES[profile?.personality?.type] || PERSONALITY_BASE_ROUTINES.binge;
-    const result = {};
-    for (const [space, items] of Object.entries(fallback)) {
-      result[space] = items.map(item => ({
-        id: `gen-${space}-${hashTitle(item.title)}`,
-        title: item.title,
-        minutes: item.minutes,
-        basis: item.basis,
-      }));
-    }
-    return result;
+    console.warn('[routineAI] 맞춤 루틴 AI 오류, 온보딩 폴백 사용:', e.message);
+    return buildPersonalityFallback(profile);
   }
 }
 

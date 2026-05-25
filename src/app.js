@@ -33,7 +33,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // 인증 엔드포인트 전용 강화 rate limit
 const authLimiter = rateLimit({

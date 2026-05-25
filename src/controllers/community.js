@@ -1,5 +1,24 @@
 const { db, bucket, admin } = require('../services/firebase');
 
+// base64 data URI에서 MIME 타입·확장자·버퍼를 추출하는 헬퍼
+// 지원 형식: JPEG, PNG, WebP, GIF, HEIC/HEIF
+function parseImageBase64(imageBase64) {
+  const mimeMatch = imageBase64.match(/^data:(image\/[\w+.-]+);base64,/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const extMap = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+  };
+  const ext = extMap[mimeType] || 'jpg';
+  const base64Data = imageBase64.replace(/^data:image\/[\w+.-]+;base64,/, '');
+  const buffer = Buffer.from(base64Data, 'base64');
+  return { mimeType, ext, buffer };
+}
+
 /**
  * POST /api/community/posts
  * 게시글 작성
@@ -34,17 +53,11 @@ async function createPost(req, res, next) {
         return res.status(500).json({ error: 'Firebase Storage가 설정되지 않았습니다. FIREBASE_STORAGE_BUCKET을 확인하세요.' });
       }
 
-      // data:image/jpeg;base64, 접두사 제거 처리
-      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const buffer = Buffer.from(base64Data, 'base64');
-      const filename = `community/${uid}/${Date.now()}.jpg`;
+      const { mimeType, ext, buffer } = parseImageBase64(imageBase64);
+      const filename = `community/${uid}/${Date.now()}.${ext}`;
       const file = bucket.file(filename);
 
-      await file.save(buffer, {
-        metadata: { contentType: 'image/jpeg' },
-      });
-
-      // 공개 URL 생성 (Storage 버킷이 공개 설정된 경우)
+      await file.save(buffer, { metadata: { contentType: mimeType } });
       await file.makePublic();
       imageUrl = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
     }
@@ -142,7 +155,7 @@ async function updatePost(req, res, next) {
   try {
     const uid = req.user.uid;
     const { postId } = req.params;
-    const { type, title, content, tags } = req.body;
+    const { type, title, content, tags, imageBase64, removeImage } = req.body;
 
     if (type && !['cleaning_cert', 'info_share'].includes(type)) {
       return res.status(400).json({ error: 'type은 cleaning_cert 또는 info_share여야 합니다.' });
@@ -174,6 +187,38 @@ async function updatePost(req, res, next) {
     if (content) updates.content = content.trim();
     if (tags !== undefined) updates.tags = Array.isArray(tags) ? tags : [];
 
+    // 기존 이미지 URL에서 Storage 경로 추출 후 삭제하는 헬퍼
+    async function deleteStorageImage(imageUrl) {
+      if (!bucket || !imageUrl) return;
+      try {
+        const prefix = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/`;
+        if (imageUrl.startsWith(prefix)) {
+          await bucket.file(imageUrl.slice(prefix.length)).delete();
+        }
+      } catch {
+        // 파일이 없어도 무시
+      }
+    }
+
+    const existingImageUrl = doc.data().imageUrl;
+
+    if (imageBase64) {
+      // 새 이미지 업로드: 기존 이미지 먼저 삭제
+      if (!bucket) return res.status(500).json({ error: 'Firebase Storage가 설정되지 않았습니다.' });
+      await deleteStorageImage(existingImageUrl);
+
+      const { mimeType, ext, buffer } = parseImageBase64(imageBase64);
+      const filename = `community/${uid}/${Date.now()}.${ext}`;
+      const file = bucket.file(filename);
+      await file.save(buffer, { metadata: { contentType: mimeType } });
+      await file.makePublic();
+      updates.imageUrl = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
+    } else if (removeImage) {
+      // 이미지 삭제 요청
+      await deleteStorageImage(existingImageUrl);
+      updates.imageUrl = null;
+    }
+
     await db.collection('posts').doc(postId).update(updates);
 
     res.json({ id: postId, ...doc.data(), ...updates });
@@ -199,6 +244,19 @@ async function deletePost(req, res, next) {
     // 본인 게시글인지 확인
     if (doc.data().uid !== uid) {
       return res.status(403).json({ error: '본인 게시글만 삭제할 수 있습니다.' });
+    }
+
+    // 첨부 이미지가 있으면 Storage에서도 삭제
+    const { imageUrl } = doc.data();
+    if (bucket && imageUrl) {
+      try {
+        const prefix = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/`;
+        if (imageUrl.startsWith(prefix)) {
+          await bucket.file(imageUrl.slice(prefix.length)).delete();
+        }
+      } catch {
+        // 파일이 없어도 게시글 삭제는 계속 진행
+      }
     }
 
     await db.collection('posts').doc(postId).delete();

@@ -360,6 +360,43 @@ async function searchLifeKnowledge(keywords, limit = 2) {
 }
 
 /**
+ * 좋아요 10개 이상 + info_share 커뮤니티 글에서 키워드 관련 항목 검색
+ * - type == 'info_share' 인 글을 최대 100개 가져온 뒤 메모리에서 likes >= 10 + 키워드 필터링
+ * - Firestore 단일 필드 인덱스(type)만 사용하므로 복합 인덱스 불필요
+ * - imageUrl 은 참조하지 않음 (content 텍스트만 사용)
+ */
+async function searchCommunityKnowledge(keywords, limit = 2) {
+  if (!keywords.length) return [];
+
+  const snap = await db.collection('posts')
+    .where('type', '==', 'info_share')
+    .limit(100)
+    .get();
+
+  const popular = snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(p => (p.likes || 0) >= 10);
+
+  if (!popular.length) return [];
+
+  // title 2점 + content 1점 키워드 매칭 점수
+  const scored = popular
+    .map(post => {
+      const titleText = (post.title || '').toLowerCase();
+      const contentText = (post.content || '').toLowerCase();
+      const score = keywords.reduce((acc, kw) => {
+        const k = kw.toLowerCase();
+        return acc + (titleText.includes(k) ? 2 : 0) + (contentText.includes(k) ? 1 : 0);
+      }, 0);
+      return { post, score };
+    })
+    .filter(({ score }) => score > 0);
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map(({ post }) => post);
+}
+
+/**
  * 챗봇 메시지에 대한 RAG 컨텍스트 문자열 생성
  *
  * 반환 형식:
@@ -370,9 +407,10 @@ async function buildChatbotRagContext(message) {
   const keywords = extractKeywords(message);
   if (!keywords.length) return null;
 
-  const [knowledgeDocs, lifeDocs] = await Promise.all([
+  const [knowledgeDocs, lifeDocs, communityDocs] = await Promise.all([
     searchKnowledgeBase(keywords, 2),
     searchLifeKnowledge(keywords, 2),
+    searchCommunityKnowledge(keywords, 2),
   ]);
 
   const sections = [];
@@ -387,9 +425,16 @@ async function buildChatbotRagContext(message) {
     sections.push(`■ ${doc.title}\n${doc.content}`.trim());
   }
 
+  for (const post of communityDocs) {
+    const preview = post.content.length > 300
+      ? post.content.slice(0, 300) + '…'
+      : post.content;
+    sections.push(`■ ${post.title} (커뮤니티 인기 정보, 좋아요 ${post.likes}개)\n${preview}`.trim());
+  }
+
   if (!sections.length) return null;
 
   return `[관련 지식 베이스]\n아래는 DB에서 검색된 실제 정보입니다. 이 내용을 우선적으로 참고해 답변하세요.\n\n${sections.join('\n\n')}`;
 }
 
-module.exports = { retrieveByTaskName, generateWithClaude, getTaskGuide, buildChatbotRagContext };
+module.exports = { retrieveByTaskName, generateWithClaude, getTaskGuide, buildChatbotRagContext, searchCommunityKnowledge };

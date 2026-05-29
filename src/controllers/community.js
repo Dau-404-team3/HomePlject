@@ -27,7 +27,7 @@ function parseImageBase64(imageBase64) {
 async function createPost(req, res, next) {
   try {
     const uid = req.user.uid;
-    const { type, title, content, tags = [], imageBase64 } = req.body;
+    const { type, title, content, tags = [], imageBase64Array = [] } = req.body;
 
     if (!['cleaning_cert', 'info_share'].includes(type)) {
       return res.status(400).json({ error: 'type은 cleaning_cert 또는 info_share여야 합니다.' });
@@ -45,21 +45,21 @@ async function createPost(req, res, next) {
       return res.status(400).json({ error: '내용은 5000자 이내로 입력해주세요.' });
     }
 
-    let imageUrl = null;
+    const arr = Array.isArray(imageBase64Array) ? imageBase64Array.slice(0, 5) : [];
+    let imageUrls = [];
 
-    // 이미지가 있으면 Firebase Storage에 업로드
-    if (imageBase64) {
+    if (arr.length > 0) {
       if (!bucket) {
-        return res.status(500).json({ error: 'Firebase Storage가 설정되지 않았습니다. FIREBASE_STORAGE_BUCKET을 확인하세요.' });
+        return res.status(500).json({ error: 'Firebase Storage가 설정되지 않았습니다.' });
       }
-
-      const { mimeType, ext, buffer } = parseImageBase64(imageBase64);
-      const filename = `community/${uid}/${Date.now()}.${ext}`;
-      const file = bucket.file(filename);
-
-      await file.save(buffer, { metadata: { contentType: mimeType } });
-      await file.makePublic();
-      imageUrl = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
+      imageUrls = await Promise.all(arr.map(async (b64, i) => {
+        const { mimeType, ext, buffer } = parseImageBase64(b64);
+        const filename = `community/${uid}/${Date.now()}_${i}.${ext}`;
+        const file = bucket.file(filename);
+        await file.save(buffer, { metadata: { contentType: mimeType } });
+        await file.makePublic();
+        return `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
+      }));
     }
 
     const now = new Date().toISOString();
@@ -69,7 +69,8 @@ async function createPost(req, res, next) {
       type,
       title: title.trim(),
       content: content.trim(),
-      imageUrl,
+      imageUrl: imageUrls[0] ?? null,
+      imageUrls,
       tags: Array.isArray(tags) ? tags : [],
       likes: 0,
       commentCount: 0,
@@ -155,7 +156,7 @@ async function updatePost(req, res, next) {
   try {
     const uid = req.user.uid;
     const { postId } = req.params;
-    const { type, title, content, tags, imageBase64, removeImage } = req.body;
+    const { type, title, content, tags, imageBase64Array = [], removeImageUrls = [] } = req.body;
 
     if (type && !['cleaning_cert', 'info_share'].includes(type)) {
       return res.status(400).json({ error: 'type은 cleaning_cert 또는 info_share여야 합니다.' });
@@ -187,37 +188,38 @@ async function updatePost(req, res, next) {
     if (content) updates.content = content.trim();
     if (tags !== undefined) updates.tags = Array.isArray(tags) ? tags : [];
 
-    // 기존 이미지 URL에서 Storage 경로 추출 후 삭제하는 헬퍼
-    async function deleteStorageImage(imageUrl) {
-      if (!bucket || !imageUrl) return;
+    async function deleteStorageImage(url) {
+      if (!bucket || !url) return;
       try {
         const prefix = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/`;
-        if (imageUrl.startsWith(prefix)) {
-          await bucket.file(imageUrl.slice(prefix.length)).delete();
-        }
-      } catch {
-        // 파일이 없어도 무시
-      }
+        if (url.startsWith(prefix)) await bucket.file(url.slice(prefix.length)).delete();
+      } catch { /* 파일 없어도 무시 */ }
     }
 
-    const existingImageUrl = doc.data().imageUrl;
+    const existingUrls = doc.data().imageUrls || (doc.data().imageUrl ? [doc.data().imageUrl] : []);
+    const toRemove = Array.isArray(removeImageUrls) ? removeImageUrls : [];
+    const toAdd = Array.isArray(imageBase64Array) ? imageBase64Array.slice(0, 5) : [];
 
-    if (imageBase64) {
-      // 새 이미지 업로드: 기존 이미지 먼저 삭제
+    // 제거 요청된 이미지 Storage 삭제
+    await Promise.all(toRemove.map(deleteStorageImage));
+
+    // 새 이미지 업로드
+    let newUrls = [];
+    if (toAdd.length > 0) {
       if (!bucket) return res.status(500).json({ error: 'Firebase Storage가 설정되지 않았습니다.' });
-      await deleteStorageImage(existingImageUrl);
-
-      const { mimeType, ext, buffer } = parseImageBase64(imageBase64);
-      const filename = `community/${uid}/${Date.now()}.${ext}`;
-      const file = bucket.file(filename);
-      await file.save(buffer, { metadata: { contentType: mimeType } });
-      await file.makePublic();
-      updates.imageUrl = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
-    } else if (removeImage) {
-      // 이미지 삭제 요청
-      await deleteStorageImage(existingImageUrl);
-      updates.imageUrl = null;
+      newUrls = await Promise.all(toAdd.map(async (b64, i) => {
+        const { mimeType, ext, buffer } = parseImageBase64(b64);
+        const filename = `community/${uid}/${Date.now()}_${i}.${ext}`;
+        const file = bucket.file(filename);
+        await file.save(buffer, { metadata: { contentType: mimeType } });
+        await file.makePublic();
+        return `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
+      }));
     }
+
+    const finalUrls = [...existingUrls.filter(u => !toRemove.includes(u)), ...newUrls].slice(0, 5);
+    updates.imageUrls = finalUrls;
+    updates.imageUrl = finalUrls[0] ?? null;
 
     await db.collection('posts').doc(postId).update(updates);
 
@@ -246,17 +248,17 @@ async function deletePost(req, res, next) {
       return res.status(403).json({ error: '본인 게시글만 삭제할 수 있습니다.' });
     }
 
-    // 첨부 이미지가 있으면 Storage에서도 삭제
-    const { imageUrl } = doc.data();
-    if (bucket && imageUrl) {
-      try {
-        const prefix = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/`;
-        if (imageUrl.startsWith(prefix)) {
-          await bucket.file(imageUrl.slice(prefix.length)).delete();
-        }
-      } catch {
-        // 파일이 없어도 게시글 삭제는 계속 진행
-      }
+    // 첨부 이미지 전체 Storage 삭제 (imageUrls 우선, 없으면 imageUrl 폴백)
+    if (bucket) {
+      const allUrls = doc.data().imageUrls?.length
+        ? doc.data().imageUrls
+        : doc.data().imageUrl ? [doc.data().imageUrl] : [];
+      const prefix = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/`;
+      await Promise.all(allUrls.map(async (url) => {
+        try {
+          if (url?.startsWith(prefix)) await bucket.file(url.slice(prefix.length)).delete();
+        } catch { /* 파일 없어도 계속 진행 */ }
+      }));
     }
 
     await db.collection('posts').doc(postId).delete();

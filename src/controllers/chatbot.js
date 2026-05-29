@@ -110,7 +110,8 @@ function buildChatbotSystemPrompt(profile, correctionContext, ragContext) {
   // 루틴 수행 현황
   const behaviorSection = buildBehaviorStatsSection(behaviorStats);
 
-  return `마크다운 형식 절대 사용 금지.
+  // ── 정적 파트: 사용자 세션 내에서 변하지 않는 정보 (캐시 대상) ──
+  const staticPart = `마크다운 형식 절대 사용 금지.
 **, __, ##, -, *, \` 같은 마크다운 기호 사용하지 말 것.
 줄바꿈이 필요하면 자연스러운 문장으로 처리할 것.
 일반 텍스트로만 답변할 것.
@@ -139,10 +140,15 @@ ${missingSection}
 4. 답변은 간결하게, 실천 가능한 단계로 구성하세요.
 5. 한국어로만 답하세요.
 6. 파악된 추가 정보(신체 제약, 보유 도구 등)를 반드시 조언에 반영하세요.
-7. 이전 대화 요약이 있다면 자연스럽게 맥락으로 활용하되, 직접 언급은 사용자가 먼저 언급할 때만 하세요.
+7. 이전 대화 요약이 있다면 자연스럽게 맥락으로 활용하되, 직접 언급은 사용자가 먼저 언급할 때만 하세요.`;
 
-${ragContext ? `\n${ragContext}` : ''}
-${correctionContext ? `\n[이번 응답에서 반드시 교정할 내용]\n${correctionContext}` : ''}`;
+  // ── 동적 파트: 메시지마다 달라지는 정보 (캐시 제외) ──
+  const dynamicParts = [
+    ragContext ? `\n${ragContext}` : '',
+    correctionContext ? `\n[이번 응답에서 반드시 교정할 내용]\n${correctionContext}` : '',
+  ].filter(Boolean).join('\n');
+
+  return { staticPart, dynamicPart: dynamicParts };
 }
 
 function getPersonalityDesc(type) {
@@ -198,10 +204,17 @@ function buildBehaviorStatsSection(behaviorStats) {
 
 // ── AI API 호출 (plain text) ──────────────────────────────
 
-async function callChatAI(systemPrompt, history, newMessage) {
+async function callChatAI({ staticPart, dynamicPart }, history, newMessage) {
   const messages = [
     ...history.map(h => ({ role: h.role, content: h.content })),
     { role: 'user', content: newMessage },
+  ];
+
+  // system을 배열로 구성: 정적 파트에 cache_control 적용
+  // 정적 파트(프로필·지시사항)는 같은 사용자의 연속 메시지에서 캐시 히트 → 입력 토큰 ~90% 절감
+  const system = [
+    { type: 'text', text: staticPart, cache_control: { type: 'ephemeral' } },
+    ...(dynamicPart ? [{ type: 'text', text: dynamicPart }] : []),
   ];
 
   const response = await fetch(AI_API_URL, {
@@ -210,11 +223,12 @@ async function callChatAI(systemPrompt, history, newMessage) {
       'Content-Type': 'application/json',
       'x-api-key': AI_API_KEY,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'prompt-caching-2024-07-31',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
-      system: systemPrompt,
+      system,
       messages,
     }),
   });
